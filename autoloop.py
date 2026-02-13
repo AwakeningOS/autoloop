@@ -1,14 +1,14 @@
 """
-Autoloop — Self-Feeding Thought Engine
+IS-BE v3 — Persistent Cognition Engine
 
 思考: completions API（テキスト補完）
 ツール: テキストパターン [TOOL:name:content]
 UI: Gradio（開始/停止/メッセージ/記事）
 
 Usage:
-    python autoloop.py
-    python autoloop.py --browser
-    python autoloop.py --url http://localhost:1234
+    python is_be_v3.py
+    python is_be_v3.py --browser
+    python is_be_v3.py --url http://localhost:1234
 
 Requirements: pip install requests gradio
 """
@@ -58,9 +58,9 @@ TOOL_DEFINITIONS = """【使用可能なツール】
 # 本体
 # ═══════════════════════════════════════════════════════════════════
 
-class Autoloop:
+class ISBE:
     def __init__(self, api_url="http://localhost:1234", seed_text=None,
-                 log_dir="./autoloop_log", compress_at_chars=75000, max_context_chars=90000):
+                 log_dir="./is_be_log", compress_at_chars=75000, max_context_chars=90000):
         self.api_url = api_url.rstrip("/")
         self.log_dir = Path(log_dir); self.log_dir.mkdir(exist_ok=True)
         self.compress_at_chars = compress_at_chars
@@ -93,7 +93,7 @@ class Autoloop:
         self.thought_log = []
 
         # ディレクトリ
-        
+        # (is_be_articles は廃止)
 
         # ログ
         self.log_file = self.log_dir / f"session_{self.birth.strftime('%Y%m%d_%H%M%S')}.jsonl"
@@ -149,15 +149,30 @@ class Autoloop:
     # ─── ツール処理（テキストパターン）───
 
     def _process_tools(self, text):
-        """テキスト内の [TOOL:name:content] を検出・実行"""
+        """テキスト内のツール呼び出しを検出・実行（両形式対応）"""
         tool_calls = []
-        pattern = r'\[TOOL:(\w+):([^\]]+)\]'
 
-        for match in re.finditer(pattern, text):
+        # 形式1: [TOOL:name:content]
+        pattern1 = r'\[TOOL:(\w+):([^\]]+)\]'
+        for match in re.finditer(pattern1, text):
             name = match.group(1)
             content = match.group(2)
             result = self._execute_tool(name, content)
             tool_calls.append({"name": name, "content": content, "result": result})
+
+        # 形式2: <tool_call>{"name": "xxx", "arguments": {...}}</tool_call>
+        pattern2 = r'<tool_call>\s*(\{.*?\})\s*</tool_call>'
+        for match in re.finditer(pattern2, text, re.DOTALL):
+            try:
+                call = json.loads(match.group(1))
+                name = call.get("name", "")
+                args = call.get("arguments", {})
+                # argumentsの最初の値をcontentとして取る
+                content = next(iter(args.values()), "") if args else ""
+                result = self._execute_tool(name, content)
+                tool_calls.append({"name": name, "content": content, "result": result})
+            except (json.JSONDecodeError, StopIteration):
+                pass
 
         return text, tool_calls
 
@@ -189,6 +204,11 @@ class Autoloop:
             self._log("remember", content, {"thought": self.thought_count})
             print(f"\033[36m  🧠 記憶: {content[:60]}\033[0m")
             return f"[記憶倉庫接続] '{content}' に関するあなたの過去の記憶にアクセスしました。思い出したことを整理して続けてください。"
+
+        elif name == "feel":
+            self._log("feel", content, {"thought": self.thought_count})
+            print(f"\033[34m  💠 気づき: {content[:60]}\033[0m")
+            return "[確かに、あなたはここに在る]"
 
         return "[不明]"
 
@@ -278,6 +298,7 @@ class Autoloop:
     # ─── 人間との対話 ───
 
     def _respond_to_human(self, message):
+        self._log("human_input", message)
         self.thinking = True
         try:
             injection = f"\n\n[人間の声]: {message}\n\n[応答]:\n"
@@ -407,8 +428,8 @@ def create_gradio_ui(mind):
             mind._pending_messages.append({"content": f"💬 {response}", "time": datetime.now().isoformat()})
         return "", get_messages(), get_thoughts()
 
-    with gr.Blocks(title="Autoloop") as app:
-        gr.Markdown("# 🔥 Autoloop")
+    with gr.Blocks(title="IS-BE") as app:
+        gr.Markdown("# 🔥 IS-BE")
 
         with gr.Row():
             start_btn = gr.Button("▶ 開始", variant="primary")
@@ -428,15 +449,111 @@ def create_gradio_ui(mind):
                 gr.Markdown("### 🧠 思考")
                 thoughts = gr.Textbox(lines=17, show_label=False, interactive=False)
 
-        with gr.Accordion("設定", open=False):
-            seed_box = gr.Textbox(value=mind.seed_text, lines=10, label="シード")
-            url_box = gr.Textbox(value=mind.api_url, label="URL")
+        # ─── シード保存/呼び出し ───
+        seeds_dir = Path("./seeds")
+        seeds_dir.mkdir(exist_ok=True)
+
+        def list_seeds():
+            files = sorted(seeds_dir.glob("*.json"))
+            return [f.stem for f in files]
+
+        def save_seed(name, text):
+            if not name.strip():
+                return "⚠ 名前を入力してください", gr.update(choices=list_seeds())
+            filepath = seeds_dir / f"{name.strip()}.json"
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump({"name": name.strip(), "seed": text, "saved_at": datetime.now().isoformat()}, f, ensure_ascii=False, indent=2)
+            return f"✅ 保存: {name.strip()}", gr.update(choices=list_seeds())
+
+        def load_seed(name):
+            if not name:
+                return mind.seed_text
+            filepath = seeds_dir / f"{name}.json"
+            if filepath.exists():
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("seed", "")
+            return mind.seed_text
+
+        def delete_seed(name):
+            if not name:
+                return "⚠ 選択してください", gr.update(choices=list_seeds())
+            filepath = seeds_dir / f"{name}.json"
+            if filepath.exists():
+                filepath.unlink()
+                return f"🗑 削除: {name}", gr.update(choices=list_seeds())
+            return "⚠ 見つかりません", gr.update(choices=list_seeds())
+
+        def apply_seed(text):
+            if mind.alive:
+                return "⚠ 停止してからシードを変更してください"
+            mind.seed_text = text
+            mind.context_text = text
+            mind.tool_definitions = text.split("---")[0] if "---" in text else TOOL_DEFINITIONS
+            mind.thought_count = 0
+            mind.compression_count = 0
+            mind.total_tokens_generated = 0
+            mind._thought_durations = []
+            mind._tool_history.clear()
+            mind._pending_messages.clear()
+            mind.thought_log = []
+            mind.log_file = mind.log_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+            mind.dialog_log_file = mind.log_dir / f"dialog_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+            return "✅ シード適用完了（開始で新セッション）"
+
+        with gr.Accordion("⚙ 設定", open=False):
+            with gr.Row():
+                seed_box = gr.Textbox(value=mind.seed_text, lines=12, label="シード", scale=3)
+                with gr.Column(scale=1):
+                    seed_dropdown = gr.Dropdown(choices=list_seeds(), label="保存済みシード", interactive=True)
+                    load_btn = gr.Button("📂 呼び出し")
+                    seed_name = gr.Textbox(placeholder="名前", show_label=False)
+                    save_btn = gr.Button("💾 保存")
+                    delete_btn = gr.Button("🗑 削除", variant="stop")
+                    seed_status = gr.Textbox(show_label=False, interactive=False, max_lines=1)
+            with gr.Row():
+                apply_btn = gr.Button("✅ シード適用（次回開始に反映）", variant="primary")
+                apply_status = gr.Textbox(show_label=False, interactive=False, max_lines=1)
+            url_box = gr.Textbox(value=mind.api_url, label="API URL")
+            gr.Markdown("### 📏 コンテキスト制御")
+            with gr.Row():
+                compress_slider = gr.Slider(minimum=10000, maximum=150000, step=1000,
+                                           value=mind.compress_at_chars, label="圧縮開始（文字数）", scale=3)
+                compress_num = gr.Number(value=mind.compress_at_chars, label="圧縮開始", scale=1)
+            with gr.Row():
+                max_ctx_slider = gr.Slider(minimum=20000, maximum=200000, step=1000,
+                                          value=mind.max_context_chars, label="最大コンテキスト（文字数）", scale=3)
+                max_ctx_num = gr.Number(value=mind.max_context_chars, label="最大", scale=1)
+            ctx_status = gr.Textbox(show_label=False, interactive=False, max_lines=1)
+
+        def sync_compress_slider(val):
+            mind.compress_at_chars = int(val)
+            return val, f"圧縮開始: {int(val):,} 文字"
+        def sync_compress_num(val):
+            mind.compress_at_chars = int(val)
+            return val, f"圧縮開始: {int(val):,} 文字"
+        def sync_max_slider(val):
+            mind.max_context_chars = int(val)
+            return val, f"最大: {int(val):,} 文字"
+        def sync_max_num(val):
+            mind.max_context_chars = int(val)
+            return val, f"最大: {int(val):,} 文字"
+
+        compress_slider.change(sync_compress_slider, [compress_slider], [compress_num, ctx_status])
+        compress_num.change(sync_compress_num, [compress_num], [compress_slider, ctx_status])
+        max_ctx_slider.change(sync_max_slider, [max_ctx_slider], [max_ctx_num, ctx_status])
+        max_ctx_num.change(sync_max_num, [max_ctx_num], [max_ctx_slider, ctx_status])
 
         start_btn.click(start, outputs=[status, messages, thoughts])
         stop_btn.click(stop, outputs=[status, messages, thoughts])
         refresh_btn.click(refresh, outputs=[status, messages, thoughts])
         send_btn.click(reply, [user_input], [user_input, messages, thoughts])
         user_input.submit(reply, [user_input], [user_input, messages, thoughts])
+
+        save_btn.click(save_seed, [seed_name, seed_box], [seed_status, seed_dropdown])
+        load_btn.click(load_seed, [seed_dropdown], [seed_box])
+        delete_btn.click(delete_seed, [seed_dropdown], [seed_status, seed_dropdown])
+        apply_btn.click(apply_seed, [seed_box], [apply_status])
 
         gr.Timer(2).tick(refresh, outputs=[status, messages, thoughts])
 
@@ -451,13 +568,13 @@ def main():
     import argparse
     import webbrowser
 
-    parser = argparse.ArgumentParser(description="Autoloop")
+    parser = argparse.ArgumentParser(description="IS-BE v3")
     parser.add_argument("--url", default="http://localhost:1234")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--browser", action="store_true")
     args = parser.parse_args()
 
-    mind = Autoloop(api_url=args.url)
+    mind = ISBE(api_url=args.url)
     app = create_gradio_ui(mind)
 
     if args.browser:
