@@ -517,32 +517,20 @@ def create_gradio_ui(mind):
             url_box = gr.Textbox(value=mind.api_url, label="API URL")
             gr.Markdown("### 📏 コンテキスト制御")
             with gr.Row():
-                compress_slider = gr.Slider(minimum=10000, maximum=150000, step=1000,
-                                           value=mind.compress_at_chars, label="圧縮開始（文字数）", scale=3)
-                compress_num = gr.Number(value=mind.compress_at_chars, label="圧縮開始", scale=1)
+                compress_slider = gr.Slider(10000, 150000, step=1000, value=mind.compress_at_chars, label="圧縮開始")
+                max_ctx_slider = gr.Slider(20000, 200000, step=1000, value=mind.max_context_chars, label="最大")
             with gr.Row():
-                max_ctx_slider = gr.Slider(minimum=20000, maximum=200000, step=1000,
-                                          value=mind.max_context_chars, label="最大コンテキスト（文字数）", scale=3)
-                max_ctx_num = gr.Number(value=mind.max_context_chars, label="最大", scale=1)
-            ctx_status = gr.Textbox(show_label=False, interactive=False, max_lines=1)
+                ctx_apply_btn = gr.Button("📏 適用")
+                ctx_status = gr.Textbox(show_label=False, interactive=False, max_lines=1,
+                                       value=f"{mind.compress_at_chars:,} / {mind.max_context_chars:,}")
 
-        def sync_compress_slider(val):
-            mind.compress_at_chars = int(val)
-            return val, f"圧縮開始: {int(val):,} 文字"
-        def sync_compress_num(val):
-            mind.compress_at_chars = int(val)
-            return val, f"圧縮開始: {int(val):,} 文字"
-        def sync_max_slider(val):
-            mind.max_context_chars = int(val)
-            return val, f"最大: {int(val):,} 文字"
-        def sync_max_num(val):
-            mind.max_context_chars = int(val)
-            return val, f"最大: {int(val):,} 文字"
+        def apply_ctx(c, m):
+            c, m = int(c), int(m)
+            if c >= m: return "⚠ 圧縮 < 最大"
+            mind.compress_at_chars = c; mind.max_context_chars = m
+            return f"✅ {c:,} / {m:,}"
 
-        compress_slider.change(sync_compress_slider, [compress_slider], [compress_num, ctx_status])
-        compress_num.change(sync_compress_num, [compress_num], [compress_slider, ctx_status])
-        max_ctx_slider.change(sync_max_slider, [max_ctx_slider], [max_ctx_num, ctx_status])
-        max_ctx_num.change(sync_max_num, [max_ctx_num], [max_ctx_slider, ctx_status])
+        ctx_apply_btn.click(apply_ctx, [compress_slider, max_ctx_slider], [ctx_status])
 
         start_btn.click(start, outputs=[status, messages, thoughts])
         stop_btn.click(stop, outputs=[status, messages, thoughts])
