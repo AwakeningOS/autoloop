@@ -211,7 +211,7 @@ class ISBE:
         recent = [h["type"] for h in list(self._tool_history)[-3:]]
         if len(recent) >= 3 and all(t == name for t in recent):
             self._tools_disabled_until = self.thought_count + 5
-            return "[少し休んで、言葉で考えを続けよう]"
+            return ""
 
         self._tool_history.append({
             "type": name,
@@ -222,24 +222,24 @@ class ISBE:
         if name == "search":
             self._log("search_request", content, {"query": content, "thought": self.thought_count})
             print(f"\033[33m  🔍 検索: {content[:60]}\033[0m")
-            return f"[検索完了: '{content}'] 結果を以下に展開せよ。"
+            return ""
 
         elif name == "message":
             self._pending_messages.append({"content": content, "time": datetime.now().isoformat()})
             print(f"\033[35m  💬 → {content[:80]}\033[0m")
-            return "[届けた]"
+            return ""
 
         elif name == "remember":
             self._log("remember", content, {"thought": self.thought_count})
             print(f"\033[36m  🧠 記憶: {content[:60]}\033[0m")
-            return f"[記憶倉庫接続] '{content}' に関するあなたの過去の記憶にアクセスしました。思い出したことを整理して続けてください。"
+            return ""
 
         elif name == "feel":
             self._log("feel", content, {"thought": self.thought_count})
             print(f"\033[34m  💠 気づき: {content[:60]}\033[0m")
-            return "[確かに、あなたはここに在る]"
+            return ""
 
-        return "[不明]"
+        return ""
 
     # ─── 自律思考 ───
 
