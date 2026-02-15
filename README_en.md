@@ -177,6 +177,27 @@ The LLM spontaneously invokes tools during its thinking process. Two formats are
 
 If the same tool is called 3 times in a row, it is temporarily paused and the LLM is nudged to continue thinking in words.
 
+## Design Insights
+
+### Auto-Injected Text Becomes a Fixed Point for Repetition
+
+In a self-feeding autonomous loop using the Completions API, **any fixed string automatically injected by the system becomes a seed for repetitive patterns**.
+
+For example, if a tool always returns the same string (such as `[No search results]` or `[Your message was displayed]`), the LLM will start generating blocks containing that string over and over, eventually filling the entire context with the same pattern ("thermodynamic death").
+
+**Principle**: Never inject fixed, information-free strings into the context via tool responses or auto-replies. Responses that carry no new information should return an empty string, leaving the context uncontaminated.
+
+```
+# Bad (becomes a fixed point)
+return "[No search results]"
+return "[Your message was displayed to the human]"
+
+# Good (doesn't contaminate context)
+return ""
+```
+
+This is a problem specific to self-feedback loops using the Completions API and is unlikely to occur with the Chat API.
+
 ## How It Works
 
 ```
