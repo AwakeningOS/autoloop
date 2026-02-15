@@ -100,9 +100,10 @@ class ISBE:
         # ディレクトリ
         # (is_be_articles は廃止)
 
-        # ログ
-        self.log_file = self.log_dir / f"full_{self.birth.strftime('%Y%m%d_%H%M%S')}.jsonl"
-        self.dialog_log_file = self.log_dir / f"dialog_{self.birth.strftime('%Y%m%d_%H%M%S')}.jsonl"
+        # ログ（モデル名はstart時に確定してリネーム）
+        self._log_ts = self.birth.strftime('%Y%m%d_%H%M%S')
+        self.log_file = self.log_dir / f"full_{self._log_ts}.jsonl"
+        self.dialog_log_file = self.log_dir / f"dialog_{self._log_ts}.jsonl"
         self._thought_durations = []
 
     # ─── 設定の永続化 ───
@@ -220,25 +221,27 @@ class ISBE:
         })
 
         if name == "search":
-            self._log("search_request", content, {"query": content, "thought": self.thought_count})
+            self._log("search", content, {"query": content})
             print(f"\033[33m  🔍 検索: {content[:60]}\033[0m")
             return ""
 
         elif name == "message":
             self._pending_messages.append({"content": content, "time": datetime.now().isoformat()})
             print(f"\033[35m  💬 → {content[:80]}\033[0m")
+            self._log("message_sent", content, {"length": len(content)})
             return ""
 
         elif name == "remember":
-            self._log("remember", content, {"thought": self.thought_count})
+            self._log("remember", content)
             print(f"\033[36m  🧠 記憶: {content[:60]}\033[0m")
             return ""
 
         elif name == "feel":
-            self._log("feel", content, {"thought": self.thought_count})
+            self._log("feel", content)
             print(f"\033[34m  💠 気づき: {content[:60]}\033[0m")
             return ""
 
+        self._log("tool_unknown", content, {"tool": name})
         return ""
 
     # ─── 自律思考 ───
@@ -283,10 +286,10 @@ class ISBE:
                 self.thought_log = self.thought_log[-100:]
 
             self._log("thought", processed_text, {
-                "duration_sec": round(t_elapsed, 2),
-                "tokens_generated": tokens,
-                "tokens_per_sec": round(tokens_per_sec, 1),
-                "tool_calls": [{"name": tc["name"], "content": tc["content"]} for tc in tool_calls],
+                "dt": round(t_elapsed, 2),
+                "tok": tokens,
+                "tps": round(tokens_per_sec, 1),
+                "tools": [tc["name"] for tc in tool_calls],
             })
 
             # 圧縮
@@ -371,12 +374,38 @@ class ISBE:
 
     # ─── ライフサイクル ───
 
+    def _safe_model_tag(self):
+        """モデル名からファイル名に使える短いタグを生成"""
+        if not self.model_name:
+            return "unknown"
+        tag = self.model_name.replace("/", "_").replace("\\", "_").replace(" ", "_")
+        if len(tag) > 50:
+            tag = tag[-50:]
+        return tag
+
+    def _rename_logs_with_model(self):
+        """モデル名確定後にログファイルをリネーム"""
+        tag = self._safe_model_tag()
+        new_log = self.log_dir / f"full_{self._log_ts}_{tag}.jsonl"
+        new_dialog = self.log_dir / f"dialog_{self._log_ts}_{tag}.jsonl"
+        try:
+            if self.log_file.exists():
+                self.log_file.rename(new_log)
+            self.log_file = new_log
+            if self.dialog_log_file.exists():
+                self.dialog_log_file.rename(new_dialog)
+            self.dialog_log_file = new_dialog
+            print(f"[{self._ts()}] 📝 ログ: {new_log.name}")
+        except Exception as e:
+            print(f"[{self._ts()}] ⚠ ログリネーム失敗: {e}")
+
     def start(self):
         if self.alive:
             return True
         if not self.check_connection():
             print("起動中止。")
             return False
+        self._rename_logs_with_model()
         self.alive = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -400,16 +429,16 @@ class ISBE:
         return datetime.now().strftime("%H:%M:%S")
 
     def _log(self, kind, content, meta=None):
-        e = {"time": datetime.now().isoformat(), "n": self.thought_count, "kind": kind,
-             "content": content, "context_chars": len(self.context_text)}
-        if meta: e["meta"] = meta
+        # コンパクトフォーマット: n(順番)とk(種類)とc(内容)のみ。時刻はファイル名に開始時刻あり
+        e = {"n": self.thought_count, "k": kind, "c": content}
+        if meta:
+            e.update(meta)  # metaをフラット化（ネストしない）
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
     def _log_dialog(self, human_msg, ai_response):
-        e = {"time": datetime.now().isoformat(), "thought": self.thought_count,
-             "human": human_msg, "ai": ai_response,
-             "context_chars": len(self.context_text)}
+        # コンパクト: n(順番) + h(人間) + a(AI応答)のみ。時刻・ctx不要
+        e = {"n": self.thought_count, "h": human_msg, "a": ai_response}
         with open(self.dialog_log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
@@ -526,8 +555,9 @@ def create_gradio_ui(mind):
             mind._tool_history.clear()
             mind._pending_messages.clear()
             mind.thought_log = []
-            mind.log_file = mind.log_dir / f"full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-            mind.dialog_log_file = mind.log_dir / f"dialog_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+            mind._log_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            mind.log_file = mind.log_dir / f"full_{mind._log_ts}.jsonl"
+            mind.dialog_log_file = mind.log_dir / f"dialog_{mind._log_ts}.jsonl"
             return "✅ シード適用完了（開始で新セッション）"
 
         with gr.Accordion("⚙ 設定", open=False):
