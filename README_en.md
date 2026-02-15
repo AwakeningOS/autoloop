@@ -238,6 +238,29 @@ Since personality is determined by just the first 1–2 lines of the seed, tests
 
 Current LLM training pipelines are optimized for "single-turn instruction → response." The capabilities required for autonomous loops (recognizing one's own output, concept of time, distinguishing between action and description) are not trained at all. Training for continuous thought would require a new reinforcement learning method that uses "quality of thought after N turns" as the reward signal.
 
+### The Continuous Thought Loop Is Blood Circulation, Not the Entire Body
+
+The continuous thought loop (`while True: context.append(output)`) corresponds to **blood circulation**. The heart (loop) is beating and blood (thought) keeps flowing. But blood alone cannot sustain life.
+
+| Human Body | AI System |
+|--|--|
+| Blood circulation | Continuous thought loop |
+| Heart | `while True: context.append(output)` |
+| Oxygen & nutrients | Human input, external information |
+| Lungs & digestive system | I/O interfaces |
+| Kidneys | Context compression (waste removal) |
+| Immune system | Low-quality text filter |
+| The entire body | The entire AI system |
+
+No oxygen comes from the lungs. No nutrients come from the stomach. The same blood circulates around and around. Oxygen depletes, waste accumulates, and eventually it stops — this is precisely the "thermodynamic death" of continuous thought. The heart hasn't stopped. The loop is still running. But nothing is coming in from outside.
+
+**Human input = breathing**. Unpredictable external input pumps "fresh oxygen" into the circulating thoughts. That's how it escapes pattern valleys. That's how it stays alive.
+
+Design principles derived from this analogy:
+
+- **Artificial respirator**: Automatic injection of external input at regular intervals (timed questions, news feeds, etc.)
+- **Building the ultimate body**: If you select only texts that resist thermodynamic death (high entropy) and use them for pre-training, you can build a "body" optimized for continuous thought. Run it with high-quality seeds, and you get a continuous thinking entity with the strongest possible circulatory system
+
 ## How It Works
 
 ```
