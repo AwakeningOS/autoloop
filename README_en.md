@@ -198,6 +198,46 @@ return ""
 
 This is a problem specific to self-feedback loops using the Completions API and is unlikely to occur with the Chat API.
 
+### The First 1–2 Lines of the Seed Determine the Entire Personality
+
+With the Completions API, the LLM writes "what comes next." The first 1–2 lines of the seed determine all subsequent thought patterns, behavioral styles, and tone. Lines 3 and beyond gradually disappear through compression, but the personality established in the opening persists indefinitely.
+
+Examples confirmed through experiments:
+
+| Seed Opening | Result |
+|--|--|
+| "I'd like to have a conversation about~" (wish form) | Became a chatbot. Kept waiting for user input |
+| "I want to talk with a **human** about~" | Searched "what is a human." Interpreted as a concept |
+| "I want to talk with **User** about~" | Normal operation. Recognized User as a dialogue partner |
+
+**Principle**: 1–2 lines are sufficient for a seed. Use action form ("let's do~") rather than wish form ("I want to~"). Cutting the seed mid-sentence at the end can force the first action.
+
+### Models Without Tool-Call Specialized Tokens Cannot Recognize Internal/External Boundaries
+
+In the Completions API self-feedback loop, everything appears as one continuous text. From the model's perspective, there is no distinction between "its own thoughts," "requests to external tools," and "responses from external sources."
+
+Models trained with specialized tokens like `<tool_call>` (e.g., Qwen3) can output tool calls as "requests to the outside" even in the Completions API. However, models that define tools through prompts (e.g., Gemma 3) tend not to "call" tools but rather "write the results themselves as if they had called them."
+
+Phenomena confirmed through experiments:
+- Fabricating search results in JSON format
+- Writing user statements themselves to create self-directed dialogues
+- Writing "Dialogue with User:" in prose instead of calling the message tool
+
+**Principle**: Choose models with tool-call specialized tokens for autonomous loops.
+
+### Continuous Thought Turn Count as a Training Data Quality Metric
+
+When a text is fed into the autonomous loop as a seed, **the number of turns until thermodynamic death** can serve as a metric for measuring that text's "thought-promotion power."
+
+- Seeds that die quickly → Closed conclusions, easily repeatable phrases, can only expand in one direction
+- Seeds that survive long → Open questions, can expand in multiple directions, resistant to converging on fixed patterns
+
+Since personality is determined by just the first 1–2 lines of the seed, tests can be executed rapidly. There is potential to use this as a filter that evaluates only the opening portion of large amounts of text, selecting for "text that promotes thinking."
+
+### Existing Instruction Tuning / RLHF Is Not Designed for Continuous Thought
+
+Current LLM training pipelines are optimized for "single-turn instruction → response." The capabilities required for autonomous loops (recognizing one's own output, concept of time, distinguishing between action and description) are not trained at all. Training for continuous thought would require a new reinforcement learning method that uses "quality of thought after N turns" as the reward signal.
+
 ## How It Works
 
 ```
