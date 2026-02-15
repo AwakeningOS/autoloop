@@ -59,12 +59,17 @@ TOOL_DEFINITIONS = """【使用可能なツール】
 # ═══════════════════════════════════════════════════════════════════
 
 class ISBE:
+    CONFIG_FILE = Path("./autoloop_config.json")
+
     def __init__(self, api_url="http://localhost:1234", seed_text=None,
                  log_dir="./is_be_log", compress_at_chars=75000, max_context_chars=90000):
         self.api_url = api_url.rstrip("/")
         self.log_dir = Path(log_dir); self.log_dir.mkdir(exist_ok=True)
         self.compress_at_chars = compress_at_chars
         self.max_context_chars = max_context_chars
+
+        # 保存済み設定があれば上書き
+        self._load_config()
 
         # 状態
         self.alive = False
@@ -96,9 +101,33 @@ class ISBE:
         # (is_be_articles は廃止)
 
         # ログ
-        self.log_file = self.log_dir / f"session_{self.birth.strftime('%Y%m%d_%H%M%S')}.jsonl"
+        self.log_file = self.log_dir / f"full_{self.birth.strftime('%Y%m%d_%H%M%S')}.jsonl"
         self.dialog_log_file = self.log_dir / f"dialog_{self.birth.strftime('%Y%m%d_%H%M%S')}.jsonl"
         self._thought_durations = []
+
+    # ─── 設定の永続化 ───
+
+    def _load_config(self):
+        if self.CONFIG_FILE.exists():
+            try:
+                with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                self.compress_at_chars = cfg.get("compress_at_chars", self.compress_at_chars)
+                self.max_context_chars = cfg.get("max_context_chars", self.max_context_chars)
+                print(f"[設定読込] 圧縮:{self.compress_at_chars:,} 最大:{self.max_context_chars:,}")
+            except Exception as e:
+                print(f"[設定読込エラー] {e}")
+
+    def save_config(self):
+        cfg = {
+            "compress_at_chars": self.compress_at_chars,
+            "max_context_chars": self.max_context_chars,
+        }
+        try:
+            with open(self.CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[設定保存エラー] {e}")
 
     # ─── 接続 ───
 
@@ -497,7 +526,7 @@ def create_gradio_ui(mind):
             mind._tool_history.clear()
             mind._pending_messages.clear()
             mind.thought_log = []
-            mind.log_file = mind.log_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+            mind.log_file = mind.log_dir / f"full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
             mind.dialog_log_file = mind.log_dir / f"dialog_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
             return "✅ シード適用完了（開始で新セッション）"
 
@@ -528,6 +557,7 @@ def create_gradio_ui(mind):
             c, m = int(c), int(m)
             if c >= m: return "⚠ 圧縮 < 最大"
             mind.compress_at_chars = c; mind.max_context_chars = m
+            mind.save_config()
             return f"✅ {c:,} / {m:,}"
 
         ctx_apply_btn.click(apply_ctx, [compress_slider, max_ctx_slider], [ctx_status])
